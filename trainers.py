@@ -6,9 +6,9 @@ import torch
 from torch.nn import RNN, Linear
 import torch.nn.functional as F
 from torch.autograd import Variable
-from torch.optim import SGD
+from torch.optim import SGD, Adam
 
-from deepnp.models import *
+from deepnp.layers import *
 
 
 class RNNTrainer:
