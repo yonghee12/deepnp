@@ -5,6 +5,7 @@ if GPU:
 
     np.cuda.set_allocator(np.cuda.MemoryPool().malloc)
     # np.add.at = np.scatter_add
+    np.cuda.Device(0).use()
 
     print('\033[92m' + '-' * 60 + '\033[0m')
     print(' ' * 23 + '\033[92mGPU Mode (cupy)\033[0m')
