@@ -36,7 +36,7 @@ class RNNTrainer:
         print(available)
         return available
 
-    def fit(self, X, y_true, batch_size, lr, n_epochs, print_many=False, verbose=1):
+    def fit(self, X, y_true, n_epochs, lr, batch_size, print_many=False, verbose=1):
         """
         X = np.array([
             [[1, 2], [4, 6], [7, 9], [5, 1]],
@@ -47,14 +47,15 @@ class RNNTrainer:
         y_true = np.array([1, 2, 1, 3])
         """
 
-        self.batch_size_global = batch_size
         self.total_size = len(X)
+        self.batch_size = batch_size
         self.time_steps = X.shape[1]
         self.max_iters = self.total_size // batch_size
-        if self.total_size % self.batch_size_global != 0:
+        if self.total_size % self.batch_size != 0:
             self.max_iters += 1
 
         if self.backend in ['np', 'numpy', 'cupy', 'cp']:
+            X, y_true = np.asarray(X), np.asarray(y_true)
             return self.train_np(X, y_true, batch_size, lr, n_epochs, print_many, verbose)
         elif self.backend in ['torch', 'pytorch']:
             return self.train_torch(X, y_true, batch_size, lr, n_epochs, print_many, verbose)
@@ -66,9 +67,9 @@ class RNNTrainer:
         x_batch = x.reshape(-1, 1, self.input_dim)
         batch_size_local = 1
 
-        rnn = RNNLayer(batch_size=batch_size_local, input_dim=self.input_dim, hidden_dim=self.hidden_dim,
+        rnn = RNNLayer(batch_size=batch_size_local, D=self.input_dim, H=self.hidden_dim,
                        Wx=self.rnn_Wx, Wh=self.rnn_Wh, bias=self.rnn_b)
-        fc = FullyConnectedLayer(W=self.fc_W, bias=self.fc_b, batch_size=batch_size_local)
+        fc = FCLayer(W=self.fc_W, bias=self.fc_b, batch_size=batch_size_local)
         h_last = rnn.forward(x_batch)
         fc_out = fc.forward(x=h_last)
 
@@ -76,7 +77,7 @@ class RNNTrainer:
         return np.argmax(probs, axis=1).item()
 
     def train_torch(self, X, y_true, batch_size, learning_rate, num_epochs, print_many, verbose):
-        self.batch_size_global = batch_size
+        self.batch_size = batch_size
         progresses = {int(num_epochs // (100 / i)): i for i in range(1, 101, 1)}
         t0 = counter()
         durations = []
@@ -84,15 +85,15 @@ class RNNTrainer:
         device = torch.device('cuda:0')
         rnn = RNN(input_size=self.input_dim, hidden_size=self.hidden_dim, num_layers=1, nonlinearity='tanh',
                   bias=True, batch_first=False).to(device)
-        fc = Linear(self.hidden_dim, self.output_size, bias=True).to(device)
+        fc = FCLayer(self.hidden_dim, self.output_size, bias=True).to(device)
         params = [rnn.parameters(), fc.parameters()]
         optimizer = SGD(chain(*params), lr=learning_rate)
         for epoch in range(num_epochs):
             epoch_loss = 0
             for i in range(self.max_iters):
-                x_batch = X[i * self.batch_size_global:(i + 1) * self.batch_size_global]
+                x_batch = X[i * self.batch_size:(i + 1) * self.batch_size]
                 x_batch = np.array([x_batch[:, step, :] for step in range(self.time_steps)])
-                y_true_batch = y_true[i * self.batch_size_global:(i + 1) * self.batch_size_global]
+                y_true_batch = y_true[i * self.batch_size:(i + 1) * self.batch_size]
                 batch_size_local = x_batch.shape[1]
 
                 # convert to pytorch tensor
@@ -102,7 +103,7 @@ class RNNTrainer:
                 x_batch = torch.tensor(x_batch, requires_grad=True).to(device)
 
                 # forward pass
-                h_stack, h_last = rnn.forward(x_batch)
+                h_stack, h_last = rnn.forward(x_batch, hx=None)
                 fc_out = fc.forward(h_last)
                 log_y_pred = F.log_softmax(input=fc_out, dim=2)
                 log_y_pred = log_y_pred.view(batch_size_local, self.output_size)
@@ -125,25 +126,33 @@ class RNNTrainer:
             return avg_epoch_time
 
     def train_np(self, X, y_true, batch_size, learning_rate, num_epochs, print_many, verbose):
-        self.batch_size_global = batch_size
+        self.batch_size = batch_size
+        lr = learning_rate
         progresses = {int(num_epochs // (100 / i)): i for i in range(1, 101, 1)}
         t0 = counter()
         durations = []
+
+        rnn = RNNLayer(input_dim=self.input_dim, hidden_dim=self.hidden_dim, Wx=self.rnn_Wx, Wh=self.rnn_Wh,
+                       bias=self.rnn_b)
+
         for epoch in range(num_epochs):
             epoch_losses = []
             for i in range(self.max_iters):
-                x_batch = X[i * self.batch_size_global:(i + 1) * self.batch_size_global]
-                x_batch = np.array([x_batch[:, step, :] for step in range(self.time_steps)])
-                y_true_batch = y_true[i * self.batch_size_global:(i + 1) * self.batch_size_global]
-                batch_size_local = x_batch.shape[1]
+                # # T*N*D batch style
+                # x_batch = X[i * self.batch_size: (i + 1) * self.batch_size]
+                # x_batch = np.array([x_batch[:, step, :] for step in range(self.time_steps)])
+                # y_true_batch = y_true[i * self.batch_size:(i + 1) * self.batch_size]
+                # current_batch_size = x_batch.shape[1]
 
-                # self.rnn_h_init = np.zeros(shape=(batch_size_local, self.hidden_dim))
-                rnn = RNNLayer(batch_size=batch_size_local, input_dim=self.input_dim, hidden_dim=self.hidden_dim,
-                               Wx=self.rnn_Wx, Wh=self.rnn_Wh, bias=self.rnn_b)
-                fc = FullyConnectedLayer(W=self.fc_W, bias=self.fc_b, batch_size=batch_size_local)
+                # N*T*D batch style
+                x_batch = X[i * self.batch_size: (i + 1) * self.batch_size]
+                y_true_batch = y_true[i * self.batch_size:(i + 1) * self.batch_size]
+                current_batch_size = x_batch.shape[0]
+
+                fc = FCLayer(W=self.fc_W, bias=self.fc_b, batch_size=current_batch_size)
                 loss = SoftmaxWithLossLayer()
 
-                h_last = rnn.forward(x_batch)
+                h_last, h_stack = rnn.forward(x_batch)
                 fc_out = fc.forward(x=h_last)
                 loss_value = loss.forward(x=fc_out, y_true=y_true_batch)
                 epoch_losses.append(loss_value)
@@ -154,16 +163,17 @@ class RNNTrainer:
                 d_fc_W = fc_grads['W_grad']
                 d_fc_bias = fc_grads['bias_grad']
                 d_h_last = fc_grads['x_grad']
-                grads = rnn.backward(d_last_hidden=d_h_last)
+                grads = rnn.backward(d_h=d_h_last, optimize=True)
 
                 # parameter update
-                lr = learning_rate
                 self.rnn_Wx -= lr * grads["Wx_grad"]
                 self.rnn_Wh -= lr * grads["Wh_grad"]
                 self.rnn_b -= lr * grads["bias_grad"]
-                # self.rnn_h_init -= lr * grads['h_init_grad']
                 self.fc_W -= lr * d_fc_W
                 self.fc_b -= lr * d_fc_bias
+
+                parameters = [self.rnn_Wx, self.rnn_Wh, self.rnn_b]
+                rnn.update(parameters)
 
             durations.append(counter() - t0)
             t0 = counter()
