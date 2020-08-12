@@ -15,6 +15,12 @@ def softmax(x):
 
 
 def cross_entropy_error(y_pred, y_true):
+    """
+    compute average cross entropy loss of a batch
+    :param y_pred:
+    :param y_true:
+    :return:
+    """
     if y_pred.ndim == 1:
         y_true = y_true.reshape(1, y_true.size)
         y_pred = y_pred.reshape(1, y_pred.size)
@@ -22,6 +28,8 @@ def cross_entropy_error(y_pred, y_true):
     # one hot -> label index
     if y_pred.size == y_true.size:
         y_true = y_true.argmax(axis=1)
+    else:
+        assert y_pred.shape[0] == y_true.size
 
     batch_size = y_pred.shape[0]
 
