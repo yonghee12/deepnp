@@ -39,7 +39,7 @@ class SoftmaxWithLossLayer:
         return dx
 
 
-class FullyConnectedLayer:
+class FCLayer:
     def __init__(self, W, bias, batch_size):
         self.params = [W, bias]
         self.grads = {
