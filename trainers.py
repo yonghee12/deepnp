@@ -12,11 +12,12 @@ from deepnp.layers import *
 
 
 class RNNTrainer:
-    def __init__(self, input_dim, hidden_dim, output_size, backend='np'):
+    def __init__(self, input_dim, hidden_dim, output_size, backend='np', timemethod='stack'):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_size = output_size
         self.backend = backend
+        self.timemethod = timemethod
 
         D, H, V = input_dim, hidden_dim, output_size
         self.rnn_Wx = np.random.randn(D, H) / np.sqrt(D)
@@ -38,12 +39,7 @@ class RNNTrainer:
 
     def fit(self, X, y_true, n_epochs, lr, batch_size, print_many=False, verbose=1):
         """
-        X = np.array([
-            [[1, 2], [4, 6], [7, 9], [5, 1]],
-            [[2, 1], [7, 9], [8, 9], [1, 2]],
-            [[9, 8], [6, 4], [2, 1], [8, 4]],
-            [[4, 8], [2, 7], [5, 7], [6, 3]],
-        ])
+        X = N, T, D
         y_true = np.array([1, 2, 1, 3])
         """
 
@@ -56,7 +52,12 @@ class RNNTrainer:
 
         if self.backend in ['np', 'numpy', 'cupy', 'cp']:
             X, y_true = np.asarray(X), np.asarray(y_true)
-            return self.train_np(X, y_true, batch_size, lr, n_epochs, print_many, verbose)
+            if self.timemethod in ['shallow', 'last']:
+                return self.train_np_last(X, y_true, batch_size, lr, n_epochs, print_many, verbose)
+            elif self.timemethod in ['stack', 'all', 'timesteps', 'timestep']:
+                return self.train_np_stack(X, y_true, batch_size, lr, n_epochs, print_many, verbose)
+            else:
+                raise
         elif self.backend in ['torch', 'pytorch']:
             return self.train_torch(X, y_true, batch_size, lr, n_epochs, print_many, verbose)
 
@@ -125,7 +126,57 @@ class RNNTrainer:
             print("average epoch time:", round(avg_epoch_time, 3))
             return avg_epoch_time
 
-    def train_np(self, X, y_true, batch_size, learning_rate, num_epochs, print_many, verbose):
+    def train_np_stack(self, X, y_true, batch_size, learning_rate, num_epochs, print_many, verbose):
+        self.batch_size = batch_size
+        lr = learning_rate
+        progresses = {int(num_epochs // (100 / i)): i for i in range(1, 101, 1)}
+        t0 = counter()
+        durations = []
+
+        rnn = RNNLayerWithTimesteps(input_dim=self.input_dim, hidden_dim=self.hidden_dim, Wx=self.rnn_Wx,
+                                    Wh=self.rnn_Wh, bias=self.rnn_b)
+
+        for epoch in range(num_epochs):
+            epoch_losses = []
+            for i in range(self.max_iters):
+                # N*T*D batch style
+                x_batch = X[i * self.batch_size: (i + 1) * self.batch_size]
+                y_true_batch = y_true[i * self.batch_size:(i + 1) * self.batch_size]
+                current_batch_size = x_batch.shape[0]
+
+                fc = FCLayerTimesteps(W=self.fc_W, bias=self.fc_b)
+                loss = SoftmaxWithLossLayerTimesteps()
+
+                h_last, h_stack = rnn.forward(x_batch)
+                fc_out = fc.forward(x=h_stack)
+                loss_value = loss.forward(x=fc_out, y_true=y_true_batch)
+                epoch_losses.append(loss_value)
+
+                # backward pass
+                d_L = loss.backward()
+                d_h_stack = fc.backward(d_L)
+                rnn.backward(d_h_stack=d_h_stack, optimize=True)
+
+                # parameter update
+                self.rnn_Wx -= lr * rnn.grads["Wx_grad"]
+                self.rnn_Wh -= lr * rnn.grads["Wh_grad"]
+                self.rnn_b -= lr * rnn.grads["bias_grad"]
+                self.fc_W -= lr * fc.grads['W_grad']
+                self.fc_b -= lr * fc.grads['bias_grad']
+
+                rnn.update(self.rnn_Wx, self.rnn_Wh, self.rnn_b)
+
+            durations.append(counter() - t0)
+            t0 = counter()
+            if (print_many and epoch % 100 == 0) or (not print_many and epoch in progresses):
+                print(f"after epoch: {epoch}, epoch_losses: {round(np.mean(np.array(epoch_losses)).item(), 3)}")
+
+        if verbose > 0:
+            avg_epoch_time = sum(durations) / len(durations)
+            print("average epoch time:", round(avg_epoch_time, 3))
+            return avg_epoch_time
+
+    def train_np_last(self, X, y_true, batch_size, learning_rate, num_epochs, print_many, verbose):
         self.batch_size = batch_size
         lr = learning_rate
         progresses = {int(num_epochs // (100 / i)): i for i in range(1, 101, 1)}
@@ -163,7 +214,7 @@ class RNNTrainer:
                 d_fc_W = fc_grads['W_grad']
                 d_fc_bias = fc_grads['bias_grad']
                 d_h_last = fc_grads['x_grad']
-                grads = rnn.backward(d_h=d_h_last, optimize=True)
+                grads = rnn.backward(d_h_next=d_h_last, optimize=True)
 
                 # parameter update
                 self.rnn_Wx -= lr * grads["Wx_grad"]
