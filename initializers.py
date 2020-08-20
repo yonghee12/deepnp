@@ -12,3 +12,7 @@ def zeros(*args):
 
 def empty(*args):
     return np.empty(shape=(*args,))
+
+
+def simplexavier(*args):
+    return normal(*args) / np.sqrt(args[0])
