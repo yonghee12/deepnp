@@ -36,4 +36,6 @@ def cross_entropy_error(y_pred, y_true):
     y_hat = y_pred[np.arange(batch_size), y_true]
     log_y_hat = np.log(y_hat + 1e-7)
     losses = -np.sum(log_y_hat)
-    return losses / batch_size
+    average_loss = losses / batch_size
+    num_acc = np.sum(y_pred.argmax(axis=1) == y_true).item()
+    return average_loss, num_acc
