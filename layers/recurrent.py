@@ -50,6 +50,72 @@ class RNNCell:
         return self.grads
 
 
+class LSTMCell:
+    def __init__(self, batch_size, input_dim, hidden_dim, Wx=None, Wh=None, bias=None):
+        N, D, H = batch_size, input_dim, hidden_dim
+        Wx = init.simplexavier(D, 4 * H) if Wx is None else Wx
+        Wh = init.simplexavier(H, 4 * H) if Wh is None else Wh
+        bias = init.simplexavier(4 * H) if bias is None else bias
+        self.hidden_dim = hidden_dim
+        self.batch_size = batch_size
+        self.parameters = [Wx, Wh, bias]
+        self.grads = {'Wx': np.zeros_like(Wx),
+                      'Wh': np.zeros_like(Wh),
+                      'bias': np.zeros_like(bias)}
+        self.cache = {}
+
+    def forward(self, x, c_prev, h_prev):
+        # x_t : (N, D) c_prev, h_prev : (N, H)
+        H = self.hidden_dim
+        Wx, Wh, bias = self.parameters
+        fc = x @ Wx + h_prev @ Wh + bias
+
+        f = sigmoid(fc[:H])
+        n = np.tanh(fc[H:2 * H])
+        i = sigmoid(fc[2 * H:3 * H])
+        o = sigmoid(fc[3 * H:])
+
+        c_next = (c_prev * f) + (n * i)
+        h_next = np.tanh(c_next) * o
+        self.cache = (x, c_prev, h_prev, c_next, h_next, f, n, i, o,)
+        return c_next, h_next
+
+    def backward(self, d_c_next_agg, d_h_next):
+        # d는 모두 N, H. 원하는 건 dWx, dWh, dbias (그 안에 모두 있음),
+        # d_h_prev, d_c_prev 구해서 보내줘야함
+        # f, n, i, o 순으로 구한 뒤 np.hstack()으로 이음
+        Wx, Wh, bias = self.parameters
+        x, c_prev, h_prev, c_next, h_next, f, n, i, o = self.cache
+
+        tanh_c_next = np.tanh(c_next)
+        d_c_next_agg = d_c_next_agg + (d_h_next * o) * (1 - tanh_c_next ** 2)
+
+        d_f = d_c_next_agg * c_prev
+        d_n = d_c_next_agg * i
+        d_i = d_c_next_agg * n
+        d_o = d_h_next * tanh_c_next
+
+        d_f *= f * (1 - f)
+        d_n *= 1 - n ** 2
+        d_i *= i * (1 - i)
+        d_o *= o * (1 - o)
+
+        d_fc = np.hstack(d_f, d_n, d_i, d_o)
+        d_Wx = x.T @ d_fc
+        d_Wh = h_prev.T @ d_fc
+        d_bias = d_fc.sum(axis=0)
+
+        self.grads['Wx'][...] = d_Wx
+        self.grads['Wh'][...] = d_Wh
+        self.grads['bias'][...] = d_bias
+
+        d_c_prev = d_c_next_agg * f
+        d_h_prev = d_fc @ Wh.T
+        d_x = d_fc @ Wx.T
+
+        return d_x, d_c_prev, d_h_prev
+
+
 class RNNLayer:
     def __init__(self, input_dim, hidden_dim, Wx=None, Wh=None, bias=None):
         D, H = input_dim, hidden_dim
@@ -161,7 +227,9 @@ class RNNLayerWithTimesteps:
         d_h_prev = init.zeros(N, H)
 
         for t, layer in enumerate(reversed(self.timestep_cells)):
-            d_h_next = 0.2 * d_h_stack[:, t, :] + d_h_prev
+            if t == 0: continue
+            # d_h_next = 0.2 * d_h_stack[:, t, :] + d_h_prev
+            d_h_next = d_h_stack[:, t, :] + d_h_prev
             grad = layer.backward(d_h_next=d_h_next, optimize=optimize)
             d_Wx += grad['Wx_grad']
             d_Wh += grad['Wh_grad']
@@ -238,15 +306,15 @@ class SoftmaxWithLossLayerTimesteps:
         x_flat = x.reshape(N * T, V)
         y_true_flat = y_true.reshape(1, N * T)
         y_pred = softmax(x_flat)
-        average_loss = cross_entropy_error(y_pred, y_true_flat)
+        average_loss, num_acc = cross_entropy_error(y_pred, y_true_flat)
         self.y_pred, self.y_true_flat = y_pred, y_true_flat
-        return average_loss
+        return average_loss, num_acc
 
     def backward(self, d_out=1):
         N, T, V = self.input_dims
         dx = self.y_pred.copy()  # N*T, V
         dx[np.arange(N * T), self.y_true_flat] -= 1  # N*T
         dx *= d_out
-        dx /= N * T
+        dx /= N * T  # batch size로 나눔
         dx = dx.reshape(N, T, V)
         return dx
