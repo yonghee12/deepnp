@@ -1,6 +1,10 @@
 from deepnp.nploader import *
 
 
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+
 def softmax(x):
     if x.ndim == 1:
         x = x - x.max()
