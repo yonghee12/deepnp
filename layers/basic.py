@@ -25,8 +25,8 @@ class SoftmaxWithLossLayer:
     def forward(self, x, y_true):
         self.y_true = y_true
         self.y_pred = softmax(x)
-        loss = cross_entropy_error(self.y_pred, self.y_true)
-        return loss
+        loss, num_acc = cross_entropy_error(self.y_pred, self.y_true)
+        return loss, num_acc
 
     def backward(self, d_out=1):
         batch_size = self.y_true.shape[0]
