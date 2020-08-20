@@ -62,16 +62,17 @@ class RNNTrainer:
             return self.train_torch(X, y_true, batch_size, lr, n_epochs, print_many, verbose)
 
     def predict(self, x):
+        # x는 T, D
         if x.shape[1] != self.input_dim or x.ndim != 2:
             raise Exception("Dimension missmatch")
 
-        x_batch = x.reshape(-1, 1, self.input_dim)
+        x = np.asarray(x)
+        x_batch = x.reshape(1, -1, self.input_dim)
         batch_size_local = 1
 
-        rnn = RNNLayer(batch_size=batch_size_local, D=self.input_dim, H=self.hidden_dim,
-                       Wx=self.rnn_Wx, Wh=self.rnn_Wh, bias=self.rnn_b)
-        fc = FCLayer(W=self.fc_W, bias=self.fc_b, batch_size=batch_size_local)
-        h_last = rnn.forward(x_batch)
+        rnn = RNNLayer(self.input_dim, self.hidden_dim, Wx=self.rnn_Wx, Wh=self.rnn_Wh, bias=self.rnn_b)
+        fc = FCLayer(W=self.fc_W, bias=self.fc_b, batch_size=1)
+        h_last, h_stack = rnn.forward(x_batch)
         fc_out = fc.forward(x=h_last)
 
         probs = softmax(fc_out)
@@ -137,7 +138,7 @@ class RNNTrainer:
                                     Wh=self.rnn_Wh, bias=self.rnn_b)
 
         for epoch in range(num_epochs):
-            epoch_losses = []
+            epoch_losses, epoch_acc = [], []
             for i in range(self.max_iters):
                 # N*T*D batch style
                 x_batch = X[i * self.batch_size: (i + 1) * self.batch_size]
@@ -149,8 +150,9 @@ class RNNTrainer:
 
                 h_last, h_stack = rnn.forward(x_batch)
                 fc_out = fc.forward(x=h_stack)
-                loss_value = loss.forward(x=fc_out, y_true=y_true_batch)
+                loss_value, num_acc = loss.forward(x=fc_out, y_true=y_true_batch)
                 epoch_losses.append(loss_value)
+                epoch_acc.append(num_acc)
 
                 # backward pass
                 d_L = loss.backward()
@@ -169,7 +171,10 @@ class RNNTrainer:
             durations.append(counter() - t0)
             t0 = counter()
             if (print_many and epoch % 100 == 0) or (not print_many and epoch in progresses):
-                print(f"after epoch: {epoch}, epoch_losses: {round(np.mean(np.array(epoch_losses)).item(), 3)}")
+                acc_s = f"{round(sum(epoch_acc) / (X.shape[0] * X.shape[1]) * 100, 4)}%"
+                loss_s = round(np.mean(np.array(epoch_losses)).item(), 3)
+                perp = round(np.exp(loss_s).item(), 2)
+                print(f"epoch: {epoch}, loss: {loss_s}, perp: {perp}, acc: {acc_s}")
 
         if verbose > 0:
             avg_epoch_time = sum(durations) / len(durations)
@@ -187,7 +192,7 @@ class RNNTrainer:
                        bias=self.rnn_b)
 
         for epoch in range(num_epochs):
-            epoch_losses = []
+            epoch_losses, epoch_acc = [], []
             for i in range(self.max_iters):
                 # # T*N*D batch style
                 # x_batch = X[i * self.batch_size: (i + 1) * self.batch_size]
@@ -205,8 +210,9 @@ class RNNTrainer:
 
                 h_last, h_stack = rnn.forward(x_batch)
                 fc_out = fc.forward(x=h_last)
-                loss_value = loss.forward(x=fc_out, y_true=y_true_batch)
+                loss_value, num_acc = loss.forward(x=fc_out, y_true=y_true_batch)
                 epoch_losses.append(loss_value)
+                epoch_acc.append(num_acc)
 
                 # backward pass
                 d_L = loss.backward()
@@ -229,7 +235,10 @@ class RNNTrainer:
             durations.append(counter() - t0)
             t0 = counter()
             if (print_many and epoch % 100 == 0) or (not print_many and epoch in progresses):
-                print(f"after epoch: {epoch}, epoch_losses: {round(np.mean(np.array(epoch_losses)).item(), 3)}")
+                acc_s = f"{round(sum(epoch_acc) / (X.shape[0]) * 100, 4)}%"
+                loss_s = round(np.mean(np.array(epoch_losses)).item(), 3)
+                perp = round(np.exp(loss_s).item(), 2)
+                print(f"epoch: {epoch}, loss: {loss_s}, perp: {perp}, acc: {acc_s}")
 
         if verbose > 0:
             avg_epoch_time = sum(durations) / len(durations)
