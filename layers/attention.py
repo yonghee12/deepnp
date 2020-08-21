@@ -86,9 +86,9 @@ class AttentionCell:
         return d_h_stack, d_ht
 
 
-class AttentionWithTimesteps:
+class AttentionLayerWithTimesteps:
     def __init__(self):
-        self.params, self.grads = [], []
+        self.params, self.grads = [], []    # 이 레이어는 계산만 수행, 파라미터 없음
         self.timestep_layers = None
         self.attention_scores = None
 

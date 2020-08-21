@@ -106,7 +106,7 @@ class RNNTrainer:
         rnn = RNN(input_size=self.input_dim, hidden_size=self.hidden_dim, num_layers=1, nonlinearity='tanh',
                   bias=True, batch_first=False).to(device)
         fc = FCLayer(self.hidden_dim, self.output_size, bias=True).to(device)
-        params = [rnn.parameters(), fc.parameters()]
+        params = [rnn.parameters(), fc.params()]
         optimizer = SGD(chain(*params), lr=learning_rate)
         for epoch in range(num_epochs):
             epoch_loss = 0

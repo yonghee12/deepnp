@@ -11,7 +11,7 @@ class RNNCell:
         Wh = init.normal(H, H) if Wh is None else Wh
         bias = init.normal(H) if bias is None else bias
         self.batch_size = N
-        self.parameters = [Wx, Wh, bias]
+        self.params = [Wx, Wh, bias]
         self.grads = {'Wx': np.zeros_like(Wx),
                       'Wh': np.zeros_like(Wh),
                       'bias': np.zeros_like(bias),
@@ -21,7 +21,7 @@ class RNNCell:
                       'h_next': None}
 
     def forward(self, x_t, h_prev):
-        Wx, Wh, bias = self.parameters
+        Wx, Wh, bias = self.params
         linear = np.matmul(x_t, Wx) + np.matmul(h_prev, Wh) + bias
         h_next = np.tanh(linear)
         self.cache = {'x_t': x_t,
@@ -30,7 +30,7 @@ class RNNCell:
         return h_next
 
     def backward(self, d_h_next=1, optimize=True):
-        Wx, Wh, bias = self.parameters
+        Wx, Wh, bias = self.params
         x_t, h_prev, h_next = self.cache['x_t'], self.cache['h_prev'], self.cache['h_next']
 
         d_linear = d_h_next * (1 - np.square(h_next))  # element-wise dot product
@@ -57,20 +57,20 @@ class RNNLayer:
         Wx = init.normal(D, H) if Wx is None else Wx
         Wh = init.normal(H, H) if Wh is None else Wh
         bias = init.normal(H) if bias is None else bias
-        self.parameters = [Wx, Wh, bias]
+        self.params = [Wx, Wh, bias]
         self.grads = {'Wx': np.zeros_like(Wx),
                       'Wh': np.zeros_like(Wh),
                       'bias': np.zeros_like(bias)}
         self.timestep_cells = []
 
     def update(self, parameters):
-        self.parameters = parameters
+        self.params = parameters
         self.timestep_cells = list()
 
     def forward(self, x_sequence, h_init=None):
         batch_size, timesteps, input_dim = x_sequence.shape
         N, T, D, H = batch_size, timesteps, input_dim, self.hidden_dim
-        Wx, Wh, bias = self.parameters
+        Wx, Wh, bias = self.params
         h_prev = init.zeros(N, H) if h_init is None else h_init
 
         # N*T*D Style
@@ -93,7 +93,7 @@ class RNNLayer:
         return h_last, h_stack
 
     def backward(self, d_h_next=1, optimize=True):
-        Wx, Wh, bias = self.parameters
+        Wx, Wh, bias = self.params
         d_Wx = np.zeros_like(Wx)
         d_Wh = np.zeros_like(Wh)
         d_bias = np.zeros_like(bias)
@@ -122,20 +122,20 @@ class RNNLayerWithTimesteps:
         Wx = init.normal(D, H) if Wx is None else Wx
         Wh = init.normal(H, H) if Wh is None else Wh
         bias = init.normal(H) if bias is None else bias
-        self.parameters = [Wx, Wh, bias]
+        self.params = [Wx, Wh, bias]
         self.grads = {'Wx': np.zeros_like(Wx),
                       'Wh': np.zeros_like(Wh),
                       'bias': np.zeros_like(bias)}
         self.timestep_cells = []
 
     def update(self, *parameters):
-        self.parameters = parameters
+        self.params = parameters
         self.timestep_cells = list()
 
     def forward(self, x_sequence, h_init=None):
         batch_size, timesteps, input_dim = x_sequence.shape
         N, T, D, H = batch_size, timesteps, input_dim, self.hidden_dim
-        Wx, Wh, bias = self.parameters
+        Wx, Wh, bias = self.params
         h_prev = init.zeros(N, H) if h_init is None else h_init
 
         # N*T*D Style
@@ -151,7 +151,7 @@ class RNNLayerWithTimesteps:
         return h_last, h_stack
 
     def backward(self, d_h_stack, optimize=True):
-        Wx, Wh, bias = self.parameters
+        Wx, Wh, bias = self.params
         N, T, H = d_h_stack.shape
         D, H = Wx.shape
 
@@ -189,7 +189,7 @@ class LSTMCell:
         bias = init.simplexavier(4 * H) if bias is None else bias
         self.hidden_dim = hidden_dim
         self.batch_size = batch_size
-        self.parameters = [Wx, Wh, bias]
+        self.params = [Wx, Wh, bias]
         self.grads = {'Wx': np.zeros_like(Wx),
                       'Wh': np.zeros_like(Wh),
                       'bias': np.zeros_like(bias)}
@@ -199,7 +199,7 @@ class LSTMCell:
         # x_t : (N, D) c_prev, h_prev : (N, H)
         # f : forget gate, n : new info, i : input gate, o : output gate
         H = self.hidden_dim
-        Wx, Wh, bias = self.parameters
+        Wx, Wh, bias = self.params
         fc = x @ Wx + h_prev @ Wh + bias  # N * 4H
 
         f = sigmoid(fc[:, :H])
@@ -216,7 +216,7 @@ class LSTMCell:
         # d는 모두 N, H. 원하는 건 dWx, dWh, dbias
         # d_h_prev, d_c_prev 구해서 보내줘야함
         # f, n, i, o 순으로 구한 뒤 np.hstack()으로 쌓기
-        Wx, Wh, bias = self.parameters
+        Wx, Wh, bias = self.params
         x, c_prev, h_prev, c_next, h_next, f, n, i, o = self.cache
 
         tanh_c_next = np.tanh(c_next)
@@ -257,7 +257,7 @@ class LSTMLayerTimesteps:
         bias = init.simplexavier(4 * H) if bias is None else bias
         self.cell_state, self.hidden_state, self.d_h_0 = None, None, None
         self.stateful = stateful
-        self.parameters = [Wx, Wh, bias]
+        self.params = [Wx, Wh, bias]
         self.grads = [np.zeros_like(Wx),
                       np.zeros_like(Wh),
                       np.zeros_like(bias)]
@@ -267,7 +267,7 @@ class LSTMLayerTimesteps:
         self.timestep_cells = list()
 
     def update(self, *parameters):
-        self.parameters = parameters
+        self.params = parameters
         self.timestep_cells = list()
 
     def set_state(self, h, c=None):
@@ -282,7 +282,7 @@ class LSTMLayerTimesteps:
     def forward(self, x_seq):
         N, T, D = x_seq.shape
         H = self.hidden_dim
-        Wx, Wh, bias = self.parameters
+        Wx, Wh, bias = self.params
 
         c_prev = init.zeros(N, H) if not self.stateful or self.cell_state is None else self.cell_state
         h_prev = init.zeros(N, H) if not self.stateful or self.hidden_state is None else self.hidden_state
@@ -301,7 +301,7 @@ class LSTMLayerTimesteps:
         return h_last, h_stack
 
     def backward(self, d_h_stack, optimize=True):
-        Wx, Wh, bias = self.parameters
+        Wx, Wh, bias = self.params
         N, T, H = d_h_stack.shape
         D, _ = Wx.shape
 
@@ -432,7 +432,7 @@ class Embedding:
 class EmbeddingTimesteps:
     def __init__(self, W):
         self.params = [W]
-        self.grad = [np.zeros_like(W)]
+        self.grads = [np.zeros_like(W)]
         self.layers = None
         self.W = W
 
@@ -459,5 +459,5 @@ class EmbeddingTimesteps:
             layer.backward(dout[:, t, :])
             grad += layer.grads[0]
 
-        self.grad[0][...] = grad
+        self.grads[0][...] = grad
         return None

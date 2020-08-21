@@ -1,5 +1,4 @@
-from ..functions import *
-from ..layers import *
+from .recurrent import *
 from .. import initializers as init
 
 class Encoder:
@@ -15,8 +14,8 @@ class Encoder:
         self.embedding = EmbeddingTimesteps(embed_W)
         self.lstm = LSTMLayerTimesteps(D, H, lstm_Wx, lstm_Wh, lstm_b, stateful=False)
 
-        self.params = self.embedding.params + self.lstm.parameters
-        self.grads = self.embedding.grad + self.lstm.grads
+        self.params = self.embedding.params + self.lstm.params
+        self.grads = self.embedding.grads + self.lstm.grads
         self.h_last, self.h_stack = None, None
 
     def forward(self, x_seq):
@@ -29,9 +28,9 @@ class Encoder:
         d_h_stack = np.zeros_like(self.h_stack)
         d_h_stack[:, -1, :] = d_h_last
 
-        d_out = self.lstm.backward(d_h_stack)
-        d_out = self.embedding.backward(d_out)
-        return d_out
+        d_emb = self.lstm.backward(d_h_stack)
+        d_x_seq = self.embedding.backward(d_emb)
+        return d_x_seq
 
 
 class Decoder:
@@ -51,15 +50,15 @@ class Decoder:
         self.fc = FCLayerTimesteps(fc_W, fc_b)
 
         self.peeky = peeky
-        self.params = self.embedding.params + self.lstm.parameters + self.fc.params
-        self.grads = self.embedding.grad + self.lstm.grads + self.fc.grads
+        self.params = self.embedding.params + self.lstm.params + self.fc.params
+        self.grads = self.embedding.grads + self.lstm.grads + self.fc.grads
 
-    def forward(self, x_seq, e_h_last):
-        self.lstm.set_state(e_h_last)
+    def forward(self, x_seq, enc_h_last):
+        self.lstm.set_state(enc_h_last)
         x_emb = self.embedding.forward(x_seq)
 
         if self.peeky:
-            h_repeat = self.repeat_peeky(x_emb, e_h_last)
+            h_repeat = self.repeat_peeky(x_emb, enc_h_last)
 
         x_emb = x_emb if not self.peeky else self.concat_peeky(h_repeat, x_emb)
         h_last, h_stack = self.lstm.forward(x_emb)
@@ -73,7 +72,7 @@ class Decoder:
         if not self.peeky:
             d_out = self.fc.backward(d_out)
             d_out = self.lstm.backward(d_out)
-            d_out = self.embedding.backward(d_out)
+            self.embedding.backward(d_out)
             d_h = self.lstm.d_h_0
             return d_h
         else:
