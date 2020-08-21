@@ -9,22 +9,35 @@ from torch.autograd import Variable
 from torch.optim import SGD, Adam
 
 from deepnp.layers import *
+from deepnp.optimizers import *
 
 
 class RNNTrainer:
-    def __init__(self, input_dim, hidden_dim, output_size, backend='np', timemethod='stack'):
+    def __init__(self, input_dim, hidden_dim, output_size, layer='lstm', stateful=False, timemethod='stack',
+                 backend='np'):
+        assert layer in ['rnn', 'lstm']
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_size = output_size
         self.backend = backend
         self.timemethod = timemethod
+        self.layertype = layer
+        self.stateful = stateful
 
-        D, H, V = input_dim, hidden_dim, output_size
-        self.rnn_Wx = np.random.randn(D, H) / np.sqrt(D)
-        self.rnn_Wh = np.random.randn(H, H) / np.sqrt(H)
-        self.rnn_b = np.random.randn(H) / np.sqrt(H)
-        self.fc_W = np.random.randn(H, V) / np.sqrt(H)
-        self.fc_b = np.random.randn(V) / np.sqrt(V)
+        self.weight_initialize()
+
+    def weight_initialize(self):
+        D, H, V = self.input_dim, self.hidden_dim, self.output_size
+        self.fc_W = init.simplexavier(H, V)
+        self.fc_b = init.simplexavier(V)
+        if self.layertype == 'rnn':
+            self.rnn_Wx = init.simplexavier(D, H)
+            self.rnn_Wh = init.simplexavier(H, H)
+            self.rnn_b = init.simplexavier(H)
+        elif self.layertype == 'lstm':
+            self.rnn_Wx = init.simplexavier(D, 4 * H)
+            self.rnn_Wh = init.simplexavier(H, 4 * H)
+            self.rnn_b = init.simplexavier(4 * H)
 
     def check_gpu(self):
         if GPU:
@@ -70,7 +83,12 @@ class RNNTrainer:
         x_batch = x.reshape(1, -1, self.input_dim)
         batch_size_local = 1
 
-        rnn = RNNLayer(self.input_dim, self.hidden_dim, Wx=self.rnn_Wx, Wh=self.rnn_Wh, bias=self.rnn_b)
+        if self.layertype == 'rnn':
+            rnn = RNNLayerWithTimesteps(input_dim=self.input_dim, hidden_dim=self.hidden_dim, Wx=self.rnn_Wx,
+                                        Wh=self.rnn_Wh, bias=self.rnn_b)
+        elif self.layertype == 'lstm':
+            rnn = LSTMLayerTimesteps(self.input_dim, self.hidden_dim, self.rnn_Wx, self.rnn_Wh, self.rnn_b,
+                                     stateful=False)
         fc = FCLayer(W=self.fc_W, bias=self.fc_b, batch_size=1)
         h_last, h_stack = rnn.forward(x_batch)
         fc_out = fc.forward(x=h_last)
@@ -134,8 +152,12 @@ class RNNTrainer:
         t0 = counter()
         durations = []
 
-        rnn = RNNLayerWithTimesteps(input_dim=self.input_dim, hidden_dim=self.hidden_dim, Wx=self.rnn_Wx,
-                                    Wh=self.rnn_Wh, bias=self.rnn_b)
+        if self.layertype == 'rnn':
+            rnn = RNNLayerWithTimesteps(input_dim=self.input_dim, hidden_dim=self.hidden_dim, Wx=self.rnn_Wx,
+                                        Wh=self.rnn_Wh, bias=self.rnn_b)
+        elif self.layertype == 'lstm':
+            rnn = LSTMLayerTimesteps(self.input_dim, self.hidden_dim, self.rnn_Wx, self.rnn_Wh, self.rnn_b,
+                                     self.stateful)
 
         for epoch in range(num_epochs):
             epoch_losses, epoch_acc = [], []
@@ -154,17 +176,28 @@ class RNNTrainer:
                 epoch_losses.append(loss_value)
                 epoch_acc.append(num_acc)
 
+                if verbose >= 2:
+                    acc_s = f"{round(num_acc / (x_batch.shape[0] * x_batch.shape[1]) * 100, 4)}%"
+                    loss_s = round(loss_value.item(), 3)
+                    perp = round(np.exp(loss_s).item(), 2)
+                    print(f"epoch-iter: {epoch}-{i}, loss: {loss_s}, perp: {perp}, acc: {acc_s}")
+
                 # backward pass
                 d_L = loss.backward()
                 d_h_stack = fc.backward(d_L)
                 rnn.backward(d_h_stack=d_h_stack, optimize=True)
 
+                if self.layertype == 'rnn':
+                    dWx, dWh, dbias = rnn.grads["Wx"], rnn.grads["Wh"], rnn.grads["bias"]
+                elif self.layertype == 'lstm':
+                    dWx, dWh, dbias = rnn.grads
+
                 # parameter update
-                self.rnn_Wx -= lr * rnn.grads["Wx_grad"]
-                self.rnn_Wh -= lr * rnn.grads["Wh_grad"]
-                self.rnn_b -= lr * rnn.grads["bias_grad"]
-                self.fc_W -= lr * fc.grads['W_grad']
-                self.fc_b -= lr * fc.grads['bias_grad']
+                self.rnn_Wx -= lr * dWx
+                self.rnn_Wh -= lr * dWh
+                self.rnn_b -= lr * dbias
+                self.fc_W -= lr * fc.grads[0]
+                self.fc_b -= lr * fc.grads[1]
 
                 rnn.update(self.rnn_Wx, self.rnn_Wh, self.rnn_b)
 
@@ -244,3 +277,54 @@ class RNNTrainer:
             avg_epoch_time = sum(durations) / len(durations)
             print("average epoch time:", round(avg_epoch_time, 3))
             return avg_epoch_time
+
+class Trainer:
+    def __init__(self, model, optimizer, lr):
+        self.model = model
+        self.optimizer = optimizer(lr=lr)
+
+    def fit(self, X, y, n_epochs, batch_size, print_many=False, verbose=1):
+        model, optimizer = self.model, self.optimizer
+
+        X, y = np.asarray(X), np.asarray(y)
+        total_size = len(X)
+        time_steps = X.shape[1]
+        max_iters = total_size // batch_size
+        if total_size % batch_size != 0:
+            max_iters += 1
+
+        progresses = {int(n_epochs // (100 / i)): i for i in range(1, 101, 1)}
+        t0, durations = counter(), list()
+
+        for epoch in range(n_epochs):
+            epoch_losses, epoch_acc = [], []
+            for i in range(max_iters):
+                # N*T*D batch style
+                x_batch = X[i * batch_size: (i + 1) * batch_size]
+                y_batch = y[i * batch_size:(i + 1) * batch_size]
+                current_batch_size = x_batch.shape[0]
+
+                loss = model.forward(x_batch, y_batch)
+                model.backward()
+                params, grads = model.params, model.grads
+                optimizer.update(params, grads)
+                epoch_losses.append(loss)
+
+                if verbose >= 2:
+                    loss_s = round(loss.item(), 3)
+                    perp = round(np.exp(loss_s).item(), 2)
+                    print(f"epoch-iter: {epoch}-{i}, loss: {loss_s}, perp: {perp}")
+
+            durations.append(counter() - t0)
+            t0 = counter()
+            if (print_many and epoch % 100 == 0) or (not print_many and epoch in progresses):
+                acc_s = f"{round(sum(epoch_acc) / (X.shape[0] * X.shape[1]) * 100, 4)}%"
+                loss_s = round(np.mean(np.array(epoch_losses)).item(), 3)
+                perp = round(np.exp(loss_s).item(), 2)
+                print(f"epoch: {epoch}, loss: {loss_s}, perp: {perp}, acc: {acc_s}")
+
+        if verbose > 0:
+            avg_epoch_time = sum(durations) / len(durations)
+            print("average epoch time:", round(avg_epoch_time, 3))
+            return avg_epoch_time
+

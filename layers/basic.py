@@ -1,4 +1,5 @@
 from deepnp.functions import *
+from deepnp.namedtuples import GradTuples
 
 
 class SoftmaxLayer:
@@ -42,6 +43,9 @@ class SoftmaxWithLossLayer:
 class FCLayer:
     def __init__(self, W, bias, batch_size):
         self.params = [W, bias]
+        # self.grads = GradTuples.fc(W=np.zeros_like(W),
+        #                            x=np.zeros(shape=(batch_size, W.shape[0]), dtype=float),
+        #                            bias=np.zeros_like(bias))
         self.grads = {
             'W_grad': np.zeros_like(W),
             'x_grad': np.zeros(shape=(batch_size, W.shape[0]), dtype=float),
