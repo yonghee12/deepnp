@@ -1,5 +1,7 @@
 from .recurrent import *
 from .attention import *
+from .seq2seq import *
+from ..layers import *
 from .. import initializers as init
 
 
@@ -48,7 +50,7 @@ class AttentionDecoder:
         x_emb = self.embedding.forward(x_seq)
         dec_h_last, dec_h_stack = self.lstm.forward(x_emb)  # N, T, H
         contexts = self.attention.forward(enc_h_stack, dec_h_stack)  # N, T, H
-        h_context = np.concatenate(arrays=(contexts, dec_h_stack), axis=2)  # N, T, 2H
+        h_context = np.concatenate((contexts, dec_h_stack), axis=2)  # N, T, 2H
         out = self.fc.forward(h_context)  # N, T, V
 
         return out
@@ -70,6 +72,26 @@ class AttentionDecoder:
 
         return d_enc_h_stack
 
+    def generate(self, enc_hs, start_id, sample_size):
+        sampled = []
+        sample_id = start_id
+        h_last, enc_hs = enc_hs
+        self.lstm.set_state(h_last)
+
+        for _ in range(sample_size):
+            x = np.array([sample_id]).reshape((1, 1))
+
+            out = self.embedding.forward(x)
+            dec_hlast, dec_hs = self.lstm.forward(out)
+            c = self.attention.forward(enc_hs, dec_hs)
+            out = np.concatenate((c, dec_hs), axis=2)
+            score = self.fc.forward(out)
+
+            sample_id = np.argmax(score.flatten())
+            sampled.append(sample_id)
+
+        return sampled
+
 
 class Seq2SeqWithAttention(Seq2Seq):
     def __init__(self, embedding_dim, hidden_dim, vocab_size):
@@ -80,3 +102,13 @@ class Seq2SeqWithAttention(Seq2Seq):
 
         self.params = self.encoder.params + self.decoder.params
         self.grads = self.encoder.grads + self.decoder.grads
+
+    def forward(self, x_seq, y_seq):
+        # N, T
+        decoder_x, decoder_y = y_seq[:, :-1], y_seq[:, 1:]
+
+        self.reset_timesteps()
+        h_last, h_stack = self.encoder.forward(x_seq)
+        out = self.decoder.forward(decoder_x, h_stack, h_last)
+        average_loss, num_acc = self.loss.forward(out, decoder_y)
+        return average_loss
