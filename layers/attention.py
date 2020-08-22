@@ -1,4 +1,6 @@
-from . import *
+from ..layers import *
+from .basic import SoftmaxLayer
+from ..nploader import *
 
 
 class WeightedSum:
