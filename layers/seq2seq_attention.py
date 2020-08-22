@@ -7,6 +7,7 @@ class AttentionEncoder(Encoder):
     """
     기존 encoder와 다른 점: h_last뿐 아니라 h_stack도 같이 넘겨줌
     """
+
     def forward(self, x_seq):
         x_emb = self.embedding.forward(x_seq)
         h_last, h_stack = self.lstm.forward(x_emb)
@@ -45,10 +46,10 @@ class AttentionDecoder:
         self.lstm.set_state(enc_h_last)
 
         x_emb = self.embedding.forward(x_seq)
-        dec_h_last, dec_h_stack = self.lstm.forward(x_emb)                      # N, T, H
-        context = self.attention.forward(enc_h_stack, dec_h_stack)              # N, T, H
-        h_context = np.concatenate(arrays=(context, dec_h_stack), axis=2)       # N, T, 2H
-        out = self.fc.forward(h_context)   # N, T, V
+        dec_h_last, dec_h_stack = self.lstm.forward(x_emb)  # N, T, H
+        contexts = self.attention.forward(enc_h_stack, dec_h_stack)  # N, T, H
+        h_context = np.concatenate(arrays=(contexts, dec_h_stack), axis=2)  # N, T, 2H
+        out = self.fc.forward(h_context)  # N, T, V
 
         return out
 
@@ -57,5 +58,25 @@ class AttentionDecoder:
         N, T, H2 = d_h_context.shape
         H = int(H2 / 2)
 
-        d_context, d_dec_h_stack0 = d_h_context[:, :, :H], d_h_context[:, :, H:]
-        
+        d_contexts, d_dec_h_stack0 = d_h_context[:, :, :H], d_h_context[:, :, H:]
+        d_enc_h_stack, d_dec_h_stack1 = self.attention.backward(d_contexts)
+        d_dec_h_stack = d_dec_h_stack0 + d_dec_h_stack1
+
+        d_x_emb = self.lstm.backward(d_dec_h_stack)
+        self.embedding.backward(d_x_emb)
+
+        d_enc_h_last = self.lstm.d_h_0
+        d_enc_h_stack[:, -1] += d_enc_h_last
+
+        return d_enc_h_stack
+
+
+class Seq2SeqWithAttention(Seq2Seq):
+    def __init__(self, embedding_dim, hidden_dim, vocab_size):
+        D, H, V = embedding_dim, hidden_dim, vocab_size
+        self.encoder = AttentionEncoder(D, H, V)
+        self.decoder = AttentionDecoder(D, H, V)
+        self.loss = SoftmaxWithLossLayerTimesteps()
+
+        self.params = self.encoder.params + self.decoder.params
+        self.grads = self.encoder.grads + self.decoder.grads
