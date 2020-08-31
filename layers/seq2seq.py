@@ -4,7 +4,7 @@ from .. import initializers as init
 class Encoder:
     def __init__(self, embedding_dim, hidden_dim, vocab_size):
         D, H, V = embedding_dim, hidden_dim, vocab_size
-        self.embeeding_dim, self.hidden_dim, self.vocab_size = D, H, V
+        self.embedding_dim, self.hidden_dim, self.vocab_size = D, H, V
 
         embed_W = init.simplexavier(V, D)
         lstm_Wx = init.simplexavier(D, 4 * H)
@@ -36,7 +36,7 @@ class Encoder:
 class Decoder:
     def __init__(self, embedding_dim, hidden_dim, vocab_size, peeky=False):
         D, H, V = embedding_dim, hidden_dim, vocab_size
-        self.embeeding_dim, self.hidden_dim, self.vocab_size = D, H, V
+        self.embedding_dim, self.hidden_dim, self.vocab_size = D, H, V
 
         embed_W = init.simplexavier(V, D)
         lstm_Wx = init.simplexavier(D, 4 * H) if not peeky else init.simplexavier(H + D, 4 * H)
